@@ -64,6 +64,33 @@ function validateApiKeyCompatibility(customApiKey: string | undefined, aiProvide
   return null;
 }
 
+// Maps fictional/experimental/unsupported Gemini model names to the actual, highest-limit supported models in standard API
+function mapModelToValidGeminiModel(modelName: string | undefined): string {
+  const defaultModel = "gemini-3.5-flash";
+  if (!modelName || !modelName.trim()) return defaultModel;
+  const name = modelName.trim().toLowerCase();
+  
+  if (name.includes("3.5-flash") || name.trim() === "gemini-3.5-flash") {
+    return "gemini-3.5-flash";
+  }
+  if (name.includes("3.1-flash-lite") || name.includes("flash-lite") || name.includes("lite")) {
+    return "gemini-3.1-flash-lite";
+  }
+  if (name.includes("3.1-pro-preview") || name.includes("3.1-pro") || name.includes("gemini-3.1-pro")) {
+    return "gemini-3.1-pro-preview";
+  }
+  if (name.includes("2.5-flash") || name === "gemini-2.5-flash") {
+    return "gemini-3.5-flash";
+  }
+  if (name.includes("2.5-pro") || name === "gemini-2.5-pro") {
+    return "gemini-3.1-pro-preview";
+  }
+  if (name.includes("1.5-flash") || name.includes("1.5-pro")) {
+    return "gemini-3.5-flash";
+  }
+  return modelName.trim();
+}
+
 // Self-healing, multi-tier fallback helper to route model generation calls resiliently
 async function runGenerativeModelWithFallback(
   apiModel: string,
@@ -183,46 +210,56 @@ async function runGenerativeModelWithFallback(
     }
   }
 
-  const currentModel = apiModel || "gemini-3.5-flash";
+  const actualModel = mapModelToValidGeminiModel(apiModel || "gemini-3.5-flash");
   let response;
+
+  // Sanitize config to prevent combining Google Search / tool use with responseMimeType: "application/json"
+  // This avoids the: "Tool use with a response mime type: 'application/json' is unsupported" error
+  const finalParamsConfig = params.config ? { ...params.config } : undefined;
+  if (finalParamsConfig) {
+    if (finalParamsConfig.responseMimeType === "application/json" && finalParamsConfig.tools) {
+      console.warn("[Sanitizer] Combined 'tools' (Google Search/grounding) with responseMimeType 'application/json'. Removing tools as they are mutually exclusive in the Gemini API.");
+      delete finalParamsConfig.tools;
+    }
+  }
 
   // Try Tier 1: User's selected model and custom/default key
   try {
     const ai = getGeminiClient(customApiKey);
     response = await ai.models.generateContent({
-      model: currentModel,
+      model: actualModel,
       contents: params.contents,
-      config: params.config
+      config: finalParamsConfig
     });
     return response;
   } catch (tier1Error: any) {
-    console.warn(`Tier 1 generation with ${currentModel} failed:`, tier1Error.message || tier1Error);
+    console.warn(`Tier 1 generation with ${actualModel} failed:`, tier1Error.message || tier1Error);
 
     // Try Tier 2: If we had a custom API key, try with the default system key
     if (customApiKey && customApiKey.trim()) {
       try {
-        console.info(`Attempting Tier 2 fallback with default system key for model ${currentModel}`);
+        console.info(`Attempting Tier 2 fallback with default system key for model ${actualModel}`);
         const aiDefault = getGeminiClient();
         response = await aiDefault.models.generateContent({
-          model: currentModel,
+          model: actualModel,
           contents: params.contents,
-          config: params.config
+          config: finalParamsConfig
         });
         return response;
       } catch (tier2Error: any) {
-        console.warn(`Tier 2 fallback to default key failed for model ${currentModel}:`, tier2Error.message || tier2Error);
+        console.warn(`Tier 2 fallback to default key failed for model ${actualModel}:`, tier2Error.message || tier2Error);
       }
     }
 
     // Try Tier 3: If selected model was NOT gemini-3.5-flash, fall back to gemini-3.5-flash using custom key
-    if (currentModel !== "gemini-3.5-flash") {
+    if (actualModel !== "gemini-3.5-flash") {
       try {
         console.info(`Attempting Tier 3 fallback with model gemini-3.5-flash using custom key`);
         const aiFallback = getGeminiClient(customApiKey);
         response = await aiFallback.models.generateContent({
           model: "gemini-3.5-flash",
           contents: params.contents,
-          config: params.config
+          config: finalParamsConfig
         });
         return response;
       } catch (tier3Error: any) {
@@ -235,7 +272,7 @@ async function runGenerativeModelWithFallback(
             response = await aiFallbackDefault.models.generateContent({
               model: "gemini-3.5-flash",
               contents: params.contents,
-              config: params.config
+              config: finalParamsConfig
             });
             return response;
           } catch (tier3bError: any) {
@@ -245,7 +282,21 @@ async function runGenerativeModelWithFallback(
       }
     }
 
-    throw new Error(`所有 AI 模型呼叫（包括後備模型）均已失敗。原因: ${tier1Error.message || tier1Error}`);
+    // Try Tier 4: Safe, industry-stable fallback to gemini-3.1-flash-lite with default key which has standard global free tier availability
+    try {
+      console.info("Attempting Tier 4 fallback with stable model gemini-3.1-flash-lite using default key");
+      const ai15Default = getGeminiClient();
+      response = await ai15Default.models.generateContent({
+        model: "gemini-3.1-flash-lite",
+        contents: params.contents,
+        config: finalParamsConfig
+      });
+      return response;
+    } catch (tier4Error: any) {
+      console.warn("Tier 4 stable fallback to gemini-3.1-flash-lite failed:", tier4Error.message || tier4Error);
+    }
+
+    throw new Error(`所有 AI 模型呼叫（包括後備與穩定相容模式）均已失敗。原因: ${tier1Error.message || tier1Error}`);
   }
 }
 
@@ -267,24 +318,6 @@ const SYSTEM_INSTRUCTION = `
 3. **AI Agent 3 (統計與風險提示官)**:
    - 負責找出 Agent 1 & Agent 2 推演中被忽略的「數據盲區」與「黑天鵝事件」風險。
    - 分析大眾輿論與投注情緒（智慧情緒熱度），並警示可能出現的心理冷門（平局、逆轉）。
-
-請嚴格按照提供的 JSON Schema 規格生成結構化數據，所有文本描述必須使用繁體中文，語氣需表現出頂級賽事解說與精算師的專業水準。
-`.trim();��AI專家（Agent 1、Agent 2、Agent 3）之間的賽事辯論、反駁與整合過程，並輸出高質量的分析報告。
-
-專家的分工與角色設定如下：
-
-1. **AI Agent 1 (數據分析專家)**:
-   - 負責深入分析硬數據與戰術形勢、球隊近期狀態、主客場攻防實力（進球率/失球率/零封過往記錄）。
-   - 探討陣容與球員動向（關鍵傷病、停賽、核心球員回歸）。
-   - 查閱歷史交鋒戰績（對賽往績、戰術相剋性）。
-
-2. **AI Agent 2 (比分預測大師)**:
-   - 根據 Agent 1 的分析，提供具體且合邏輯的預測比分、勝平負概率（%），以及對預測的初始信心度（0-100%）。
-   - **必須運用至少兩種不同的比分預測模型�    // Validate API key compatibility to prevent confusing cross-platform key mismatches
-    const keyMatchError = validateApiKeyCompatibility(customApiKey, aiProvider || "gemini", customBaseUrl);
-    if (keyMatchError) {
-      return res.status(400).json({ error: keyMatchError });
-    } 給出最終風險評級（低 / 中 / 高）和一言蔽之的精準貼士。
 
 請嚴格按照提供的 JSON Schema 規格生成結構化數據，所有文本描述必須使用繁體中文，語氣需表現出頂級賽事解說與精算師的專業水準。
 `.trim();
