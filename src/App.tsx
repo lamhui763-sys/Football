@@ -552,16 +552,32 @@ export default function App() {
   
   // Custom API Key & Model choice states
   const [customApiKey, setCustomApiKey] = useState(() => {
-    return localStorage.getItem("football_custom_api_key") || "";
+    try {
+      return localStorage.getItem("football_custom_api_key") || "";
+    } catch (e) {
+      return "";
+    }
   });
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem("football_selected_model") || "gemini-3.5-flash";
+    try {
+      return localStorage.getItem("football_selected_model") || "gemini-3.5-flash";
+    } catch (e) {
+      return "gemini-3.5-flash";
+    }
   });
   const [aiProvider, setAiProvider] = useState<"gemini" | "openai" | "grok" | "custom">(() => {
-    return (localStorage.getItem("football_ai_provider") as any) || "gemini";
+    try {
+      return (localStorage.getItem("football_ai_provider") as any) || "gemini";
+    } catch (e) {
+      return "gemini";
+    }
   });
   const [customBaseUrl, setCustomBaseUrl] = useState(() => {
-    return localStorage.getItem("football_custom_base_url") || "";
+    try {
+      return localStorage.getItem("football_custom_base_url") || "";
+    } catch (e) {
+      return "";
+    }
   });
   const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
