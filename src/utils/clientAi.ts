@@ -1,5 +1,5 @@
 // Client-side execution proxy and fallbacks for Vercel/Static hosting environments
-import { PredictionData } from "../App";
+import { PredictionData } from "../types";
 
 // Local simulated event model fallback generator
 export function generateFallbackSimulation(homeTeam: string, awayTeam: string, focusTopic: string) {
