@@ -22,7 +22,6 @@ import {
   Activity
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { runSimulate } from "../utils/clientAi.ts";
 
 interface SimulationMeta {
   homeTeam: string;
@@ -299,15 +298,26 @@ export default function MatchSimulator({
         setIsPlaying(false);
 
         try {
-          const data = await runSimulate({
-            homeTeam: initialHomeTeam,
-            awayTeam: initialAwayTeam,
-            focusTopic: initialFocusTopic,
-            customApiKey,
-            modelName: selectedModel,
-            aiProvider,
-            customBaseUrl
+          const response = await fetch("/api/simulate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              homeTeam: initialHomeTeam,
+              awayTeam: initialAwayTeam,
+              focusTopic: initialFocusTopic,
+              customApiKey,
+              modelName: selectedModel,
+              aiProvider,
+              customBaseUrl
+            })
           });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `模擬伺服器出錯 (${response.status})`);
+          }
+
+          const data = await response.json();
           setSimResults(data);
           
           setCurrentMin(0);
@@ -389,15 +399,26 @@ export default function MatchSimulator({
     setIsPlaying(false);
 
     try {
-      const data = await runSimulate({
-        homeTeam,
-        awayTeam,
-        focusTopic,
-        customApiKey,
-        modelName: selectedModel,
-        aiProvider,
-        customBaseUrl
+      const response = await fetch("/api/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          homeTeam,
+          awayTeam,
+          focusTopic,
+          customApiKey,
+          modelName: selectedModel,
+          aiProvider,
+          customBaseUrl
+        })
       });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `模擬伺服器出錯 (${response.status})`);
+      }
+
+      const data = await response.json();
       setSimResults(data);
       
       // Auto start playback
