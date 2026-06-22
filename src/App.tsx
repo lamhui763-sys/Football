@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import MatchSimulator from "./components/MatchSimulator.tsx";
+import { runPredict } from "./utils/clientAi.ts";
 import {
   ResponsiveContainer,
   LineChart,
@@ -148,7 +149,7 @@ interface HistoricalPerformance {
   };
 }
 
-interface PredictionData {
+export interface PredictionData {
   matchInfo: MatchInfo;
   agent1: Agent1;
   agent2: Agent2;
@@ -750,25 +751,14 @@ export default function App() {
     } : null;
 
     try {
-      const response = await fetch("/api/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          message: queryText,
-          historicalData: historicalDataPayload,
-          customApiKey: customApiKey,
-          modelName: selectedModel,
-          aiProvider,
-          customBaseUrl
-        }),
+      const data: PredictionData = await runPredict({
+        message: queryText,
+        historicalData: historicalDataPayload,
+        customApiKey,
+        modelName: selectedModel,
+        aiProvider,
+        customBaseUrl
       });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `伺服器響應錯誤 (${response.status})`);
-      }
-
-      const data: PredictionData = await response.json();
 
       // Inject local configured historical data so it is guaranteed to display locally!
       if (!data.historicalPerformance && homeTeamObj && awayTeamObj) {
